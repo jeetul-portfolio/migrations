@@ -9,7 +9,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: mysql-migrations-runner
-      image: docker.io/jeetulsamaiya1/portfolio:migrations-master-1019
+      image: docker.io/jeetulsamaiya1/portfolio:migrations-master-1020
       imagePullPolicy: IfNotPresent
       command:
         - /bin/sh
@@ -23,9 +23,11 @@ spec:
           echo "Starting MySQL migrations" > "$LOG_FILE"
 
           set +e
-          node run-mysql-migrations.js 2>&1 | tee -a "$LOG_FILE"
-          MIGRATION_EXIT_CODE=${PIPESTATUS[0]}
+          node run-mysql-migrations.js >> "$LOG_FILE" 2>&1
+          MIGRATION_EXIT_CODE=$?
           set -e
+
+          cat "$LOG_FILE"
 
           if [ "$MIGRATION_EXIT_CODE" -eq 0 ]; then
             echo "Migrations completed successfully. Pod will exit."
