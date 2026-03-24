@@ -23,9 +23,11 @@ spec:
           echo "Starting MySQL migrations" > "$LOG_FILE"
 
           set +e
-          {{migrationCommand}} 2>&1 | tee -a "$LOG_FILE"
-          MIGRATION_EXIT_CODE=${PIPESTATUS[0]}
+          {{migrationCommand}} >> "$LOG_FILE" 2>&1
+          MIGRATION_EXIT_CODE=$?
           set -e
+
+          cat "$LOG_FILE"
 
           if [ "$MIGRATION_EXIT_CODE" -eq 0 ]; then
             echo "Migrations completed successfully. Pod will exit."
