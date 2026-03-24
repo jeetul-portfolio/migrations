@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{migrationRunnerName}}
+  namespace: {{namespace}}
+  labels:
+    app: {{migrationRunnerName}}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: {{migrationRunnerName}}
+      image: {{image}}
+      imagePullPolicy: {{migrationImagePullPolicy}}
+      command:
+        - /bin/sh
+        - -c
+      args:
+        - |
+          set -e
+          LOG_FILE="/tmp/mysql-migrations.log"
+
+          echo "Starting MySQL migrations"
+          echo "Starting MySQL migrations" > "$LOG_FILE"
+
+          set +e
+          {{migrationCommand}} 2>&1 | tee -a "$LOG_FILE"
+          MIGRATION_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$MIGRATION_EXIT_CODE" -eq 0 ]; then
+            echo "Migrations completed successfully. Pod will exit."
+            echo "Migrations completed successfully. Pod will exit." | tee -a "$LOG_FILE"
+            exit 0
+          fi
+
+          echo "Migration failed. Keeping pod alive for debugging."
+          echo "Migration failed. Keeping pod alive for debugging." | tee -a "$LOG_FILE"
+          echo "Log file available at: $LOG_FILE" | tee -a "$LOG_FILE"
+          while true; do sleep 3600; done

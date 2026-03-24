@@ -13,22 +13,5 @@
       }
     }
   },
-  "deployments": [
-    {
-      "name": "dummy-deployment",
-      "replicas": 1,
-      "image": "docker.io/jeetulsamaiya1/portfolio:dummy-master-0000",
-      "containerPort": 8080,
-      "preStartCommands": [
-        "echo Preparing app before startup",
-        "echo Pre-start checks completed"
-      ],
-      "service": {
-        "type": "ClusterIP",
-        "port": 8080,
-        "targetPort": 8080
-      },
-      "configMounts": []
-    }
-  ]
+  "deployments": []
 }

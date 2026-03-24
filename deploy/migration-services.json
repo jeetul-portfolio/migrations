@@ -1,0 +1,15 @@
+{
+  "general": {
+    "imagePullPolicy": "IfNotPresent",
+    "command": "node run-mysql-migrations.js"
+  },
+  "runners": [
+    {
+      "name": "mysql-migrations-runner",
+      "deploymentName": "mysql-migrations-runner",
+      "image": "docker.io/jeetulsamaiya1/portfolio:dummy-master-0000",
+      "namespace": "portfolio",
+      "command": "node run-mysql-migrations.js"
+    }
+  ]
+}

@@ -1,11 +1,14 @@
 const fs = require('fs');
 const path = require('path');
+const appConfig = require('../config');
 
 const configPath = path.join(__dirname, 'services.json');
+const migrationConfigPath = path.join(__dirname, 'migration-services.json');
 const templatesDir = path.join(__dirname, 'yaml-templates');
 const outputDir = path.join(__dirname, 'ymls');
 const deploymentsOutputDir = path.join(outputDir, 'deployments');
 const networkingOutputDir = path.join(outputDir, 'networking');
+const migrationsOutputDir = path.join(outputDir, 'migrations');
 
 function loadConfig(filePath) {
   try {
@@ -14,6 +17,14 @@ function loadConfig(filePath) {
   } catch (error) {
     throw new Error(`Unable to read or parse config file at ${filePath}: ${error.message}`);
   }
+}
+
+function loadOptionalConfig(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  return loadConfig(filePath);
 }
 
 function loadTemplate(templateName) {
@@ -30,6 +41,21 @@ function applyTemplate(template, values) {
   return Object.keys(values).reduce((content, key) => {
     return content.replaceAll(`{{${key}}}`, String(values[key]));
   }, template);
+}
+
+function clearOutputDirectory(directoryPath) {
+  if (!fs.existsSync(directoryPath)) {
+    return;
+  }
+
+  fs.readdirSync(directoryPath).forEach((entry) => {
+    const entryPath = path.join(directoryPath, entry);
+    const stats = fs.statSync(entryPath);
+
+    if (stats.isFile()) {
+      fs.unlinkSync(entryPath);
+    }
+  });
 }
 
 function buildInitContainersBlock(commands, image) {
@@ -106,9 +132,13 @@ function buildConfigMountBlocks(configMounts) {
   };
 }
 
-function resolveDeploymentValues(general, deployment, index) {
+function resolveDeploymentValues(general, deployment, index, migrationConfig) {
   const requestsDefaults = (general.resources && general.resources.requests) || {};
   const limitsDefaults = (general.resources && general.resources.limits) || {};
+  const migrationGeneral = (migrationConfig && migrationConfig.general) || {};
+  const migrationRunners = (migrationConfig && migrationConfig.runners) || [];
+  const migrationRunnerConfig =
+    migrationRunners.find((runner) => runner.deploymentName === deployment.name) || {};
 
   const requests = {
     cpu: (deployment.resources && deployment.resources.requests && deployment.resources.requests.cpu) || requestsDefaults.cpu,
@@ -125,6 +155,11 @@ function resolveDeploymentValues(general, deployment, index) {
 
   const namespace = deployment.namespace || general.namespace || 'default';
   const replicas = deployment.replicas || 1;
+  const mysqlConfig = appConfig.mysql || {};
+  const migrationCommand =
+    migrationRunnerConfig.command || migrationGeneral.command || 'node run-mysql-migrations.js';
+  const imagePullPolicy =
+    migrationRunnerConfig.imagePullPolicy || migrationGeneral.imagePullPolicy || 'IfNotPresent';
 
   const missingFields = [];
   if (!deployment.name) missingFields.push('name');
@@ -165,20 +200,72 @@ function resolveDeploymentValues(general, deployment, index) {
     initContainersBlock,
     volumeMountsBlock,
     volumesBlock,
+    migrationRunnerName: `${deployment.name}-mysql-migrations-runner`,
+    migrationCommand,
+    migrationImagePullPolicy: imagePullPolicy,
+    mysqlHost: mysqlConfig.host || 'localhost',
+    mysqlPort: mysqlConfig.port || 3306,
+    mysqlUser: mysqlConfig.user || 'admin',
+    mysqlPassword: mysqlConfig.password || 'supersecretpassword',
+    mysqlDatabase: mysqlConfig.database || 'portfolio',
+  };
+}
+
+function resolveMigrationRunnerValues(general, migrationGeneral, runner, deploymentMap) {
+  const mysqlConfig = appConfig.mysql || {};
+  const linkedDeployment = runner.deploymentName ? deploymentMap.get(runner.deploymentName) : null;
+  const image = runner.image || migrationGeneral.image || (linkedDeployment && linkedDeployment.image);
+
+  if (!image) {
+    throw new Error(
+      `Migration runner "${runner.name || runner.deploymentName || 'unknown'}" is missing an image. Set "image" in migration-services.json.`
+    );
+  }
+
+  const namespace =
+    runner.namespace ||
+    migrationGeneral.namespace ||
+    (linkedDeployment && linkedDeployment.namespace) ||
+    general.namespace ||
+    'default';
+
+  const runnerName =
+    runner.name ||
+    (runner.deploymentName ? `${runner.deploymentName}-mysql-migrations-runner` : null);
+
+  if (!runnerName) {
+    throw new Error('Each migration runner must include either "name" or "deploymentName".');
+  }
+
+  return {
+    migrationRunnerName: runnerName,
+    namespace,
+    image,
+    migrationCommand: runner.command || migrationGeneral.command || 'node run-mysql-migrations.js',
+    migrationImagePullPolicy: runner.imagePullPolicy || migrationGeneral.imagePullPolicy || 'IfNotPresent',
+    mysqlHost: mysqlConfig.host || 'localhost',
+    mysqlPort: mysqlConfig.port || 3306,
+    mysqlUser: mysqlConfig.user || 'admin',
+    mysqlPassword: mysqlConfig.password || 'supersecretpassword',
+    mysqlDatabase: mysqlConfig.database || 'portfolio',
   };
 }
 
 function generateFiles() {
   const config = loadConfig(configPath);
+  const migrationConfig = loadOptionalConfig(migrationConfigPath);
   const general = config.general || {};
-  const deployments = config.deployments;
+  const deployments = Array.isArray(config.deployments) ? config.deployments : [];
+  const migrationGeneral = migrationConfig.general || {};
+  const migrationRunners = Array.isArray(migrationConfig.runners) ? migrationConfig.runners : [];
 
-  if (!Array.isArray(deployments) || deployments.length === 0) {
-    throw new Error('services.json must contain a non-empty "deployments" array.');
+  if (!Array.isArray(config.deployments)) {
+    throw new Error('services.json must contain a "deployments" array (can be empty).');
   }
 
   const deploymentTemplate = loadTemplate('deployment.yaml.tpl');
   const serviceTemplate = loadTemplate('service.yaml.tpl');
+  const migrationRunnerTemplate = loadTemplate('mysql-migration-runner.yaml.tpl');
 
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
@@ -192,8 +279,18 @@ function generateFiles() {
     fs.mkdirSync(networkingOutputDir, { recursive: true });
   }
 
+  if (!fs.existsSync(migrationsOutputDir)) {
+    fs.mkdirSync(migrationsOutputDir, { recursive: true });
+  }
+
+  clearOutputDirectory(deploymentsOutputDir);
+  clearOutputDirectory(networkingOutputDir);
+  clearOutputDirectory(migrationsOutputDir);
+
+  const deploymentMap = new Map(deployments.map((deployment) => [deployment.name, deployment]));
+
   deployments.forEach((deployment, index) => {
-    const values = resolveDeploymentValues(general, deployment, index);
+    const values = resolveDeploymentValues(general, deployment, index, migrationConfig);
 
     const deploymentYamlPath = path.join(deploymentsOutputDir, `${deployment.name}-deployment.yaml`);
     const serviceYamlPath = path.join(networkingOutputDir, `${deployment.name}-service.yaml`);
@@ -206,6 +303,30 @@ function generateFiles() {
 
     console.log(`Generated: ${deploymentYamlPath}`);
     console.log(`Generated: ${serviceYamlPath}`);
+  });
+
+  if (deployments.length === 0) {
+    console.log('No deployments found. Skipped deployment/service YAML generation.');
+  }
+
+  const runnersToGenerate =
+    migrationRunners.length > 0
+      ? migrationRunners
+      : deployments.map((deployment) => ({
+          deploymentName: deployment.name,
+          image: deployment.image,
+        }));
+
+  runnersToGenerate.forEach((runner) => {
+    const values = resolveMigrationRunnerValues(general, migrationGeneral, runner, deploymentMap);
+    const migrationRunnerYamlPath = path.join(
+      migrationsOutputDir,
+      `${values.migrationRunnerName}.yaml`
+    );
+    const migrationRunnerYaml = applyTemplate(migrationRunnerTemplate, values);
+
+    fs.writeFileSync(migrationRunnerYamlPath, migrationRunnerYaml, 'utf-8');
+    console.log(`Generated: ${migrationRunnerYamlPath}`);
   });
 }
 
