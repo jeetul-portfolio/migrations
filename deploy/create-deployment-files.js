@@ -155,6 +155,7 @@ function resolveDeploymentValues(general, deployment, index, migrationConfig) {
 
   const namespace = deployment.namespace || general.namespace || 'default';
   const replicas = deployment.replicas || 1;
+  const imageOverride = process.env.IMAGE_REF;
   const mysqlConfig = appConfig.mysql || {};
   const migrationCommand =
     migrationRunnerConfig.command || migrationGeneral.command || 'node run-mysql-migrations.js';
@@ -163,7 +164,7 @@ function resolveDeploymentValues(general, deployment, index, migrationConfig) {
 
   const missingFields = [];
   if (!deployment.name) missingFields.push('name');
-  if (!deployment.image) missingFields.push('image');
+  if (!deployment.image && !imageOverride) missingFields.push('image (or IMAGE_REF env)');
   if (!deployment.containerPort) missingFields.push('containerPort');
 
   if (missingFields.length > 0) {
@@ -188,7 +189,7 @@ function resolveDeploymentValues(general, deployment, index, migrationConfig) {
     name: deployment.name,
     namespace,
     replicas,
-    image: deployment.image,
+    image: imageOverride || deployment.image,
     containerPort: deployment.containerPort,
     requestsCpu: requests.cpu,
     requestsMemory: requests.memory,
@@ -213,8 +214,13 @@ function resolveDeploymentValues(general, deployment, index, migrationConfig) {
 
 function resolveMigrationRunnerValues(general, migrationGeneral, runner, deploymentMap) {
   const mysqlConfig = appConfig.mysql || {};
+  const imageOverride = process.env.IMAGE_REF;
   const linkedDeployment = runner.deploymentName ? deploymentMap.get(runner.deploymentName) : null;
-  const image = runner.image || migrationGeneral.image || (linkedDeployment && linkedDeployment.image);
+  const image =
+    imageOverride ||
+    runner.image ||
+    migrationGeneral.image ||
+    (linkedDeployment && linkedDeployment.image);
 
   if (!image) {
     throw new Error(

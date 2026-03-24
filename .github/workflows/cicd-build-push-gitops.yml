@@ -144,44 +144,9 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Update image in deploy/services.json
+      - name: Generate deployment files
         env:
           IMAGE_REF: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_REPOSITORY }}:${{ needs.build-and-push.outputs.image_tag }}
-        run: |
-          node -e '
-          const fs = require("fs");
-          const path = "deploy/services.json";
-
-          if (!process.env.IMAGE_REF) {
-            throw new Error("IMAGE_REF is empty. Check build-and-push job outputs and registry variables.");
-          }
-
-          const config = JSON.parse(fs.readFileSync(path, "utf8"));
-          if (!Array.isArray(config.deployments) || config.deployments.length === 0) {
-            throw new Error("services.json must contain deployments array");
-          }
-
-          config.deployments = config.deployments.map((deployment, index) => {
-            if (!deployment || typeof deployment !== "object") {
-              throw new Error(`Deployment at index ${index} is not a valid object.`);
-            }
-            if (!deployment.name) {
-              throw new Error(`Deployment at index ${index} is missing name.`);
-            }
-            if (!deployment.containerPort) {
-              throw new Error(`Deployment at index ${index} (${deployment.name}) is missing containerPort.`);
-            }
-
-            return {
-              ...deployment,
-              image: process.env.IMAGE_REF,
-            };
-          });
-
-          fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
-          '
-
-      - name: Generate deployment files
         run: npm run generate:deploy-yamls
 
       - name: Commit generated files
@@ -189,7 +154,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add deploy/services.json deploy/ymls
+          git add deploy/ymls
 
           if git diff --cached --quiet; then
             echo "No manifest changes to commit."
