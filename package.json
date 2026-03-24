@@ -6,7 +6,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
-    "generate:deploy-yamls": "node deploy/create-deployment-files.js"
+    "generate:deploy-yamls": "node deploy/create-deployment-files.js",
+    "migrate": "node run-mysql-migrations.js",
+    "migrate:down": "node run-mysql-migrations.js --down",
+    "migrate:create": "bash create-mysql-migration.sh"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +17,8 @@
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1",
-    "mysql2": "^3.20.0"
+    "mysql2": "^3.20.0",
+    "sequelize": "^6.37.7",
+    "umzug": "^3.8.2"
   }
 }
