@@ -9,7 +9,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: mysql-migrations-runner
-      image: docker.io/jeetulsamaiya1/portfolio:migrations-master-1026
+      image: docker.io/jeetulsamaiya1/portfolio:migrations-master-1027
       imagePullPolicy: IfNotPresent
       command:
         - /bin/sh
